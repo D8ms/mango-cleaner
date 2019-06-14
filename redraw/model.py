@@ -53,7 +53,7 @@ class WGANDiscriminator:
 class InpaintModel:
     def create_coarse_network(self, inp, base_neurons=32):
         inp = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=1, strides=(1, 1), input_shape=(256, 256, 3))(inp)
+        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))(inp)
         x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
         x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
         x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
@@ -322,6 +322,7 @@ class InpaintModel:
             tf.summary.scalar("wgan_loss/gp_penalty_local", local_gp)
             tf.summary.scalar("wgan_loss/gp_penalty_global", global_gp)
             tf.summary.image("frame", self.norm_inp)
+            tf.summary.image("masked", masked_batch)
             tf.summary.image("prediction", self.p_fine)
             self.merged_summary = tf.summary.merge_all()
             
