@@ -278,7 +278,7 @@ class InpaintModel:
             local_mask = tf.image.crop_to_bounding_box(self.mask_ph, off_h, off_w, targ_h, targ_w)
             
             l1_loss = 1.2 * tf.reduce_mean(tf.abs(local_target - local_coarse) * self.spatial_discounting_mask_ph) + tf.reduce_mean(
-                tf.abs(local_target - local_coarse) * self.spatial_discounting_mask_ph)
+                tf.abs(local_target - local_fine) * self.spatial_discounting_mask_ph)
 
             ae_loss = (1.2 * tf.reduce_mean(tf.abs(batch_pos - self.p_coarse) * (1. - self.mask_ph)) + tf.reduce_mean(
                 tf.abs(batch_pos - self.p_fine) * (1. - self.mask_ph))) / tf.reduce_mean(1. - self.mask_ph)
