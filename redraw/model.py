@@ -5,6 +5,12 @@ from keras import backend as K
 from keras.layers import Conv2D, Dense, Activation, Reshape, Flatten
 from keras.engine import Layer
 
+from ported_ops import gen_conv
+
+def my_gen_conv(x, neurons, activation, padding, kernel_size, strides=1, rate=1):
+    #return Conv2D(neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+    return gen_conv(x, neurons, kernel_size, strides, rate, padding, activation)
+
 class Resize(Layer):
     def __init__(self, scale, **kwargs):
         self.scale = scale
@@ -32,7 +38,7 @@ class Resize(Layer):
 class WGANDiscriminator:
     def __init__(self, last_neuron_multiplier):
         base_neurons = 64
-        self.l1 = Conv2D(1 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), input_shape=(128, 128, 1))
+        self.l1 = Conv2D(1 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), input_shape=(128, 128, 3))
         self.l2 = Conv2D(2 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
         self.l3 = Conv2D(4 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
         self.l4 = Conv2D(last_neuron_multiplier * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
@@ -52,76 +58,78 @@ class WGANDiscriminator:
 
 class InpaintModel:
     def create_coarse_network(self, inp, base_neurons=32):
-        inp = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))(inp)
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+        with tf.variable_scope("coarse_network"):
+            inp = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))(inp)
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
 
-        downsampled_mask = tf.image.resize_nearest_neighbor(self.mask_ph, size=(x.get_shape().as_list()[1:3]), align_corners=True)
-        print("orig downsampled mask shape: ", downsampled_mask.shape)
+            downsampled_mask = tf.image.resize_nearest_neighbor(self.mask_ph, size=(x.get_shape().as_list()[1:3]), align_corners=True)
+            print("orig downsampled mask shape: ", downsampled_mask.shape)
 
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
 
-        x = Resize(2)(x) #upsample
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Resize(2)(x) #upsample
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
 
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
 
-        x = Resize(2)(x) #upsample
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        
-        x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(1, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
+            x = Resize(2)(x) #upsample
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            
+            x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
     
-        coarse_prediction = tf.clip_by_value(x, -1., 1.)
+            coarse_prediction = tf.clip_by_value(x, -1., 1.)
         return coarse_prediction, downsampled_mask
 
     def create_fine_network(self, inp, coarse_output, downsampled_mask, batch_size, base_neurons=32):
-        inp = coarse_output * self.mask_ph + inp * (1. - self.mask_ph)
-        inp.set_shape(inp.get_shape().as_list())
-        aug_x = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
+        with tf.variable_scope("fine_network"):
+            inp = coarse_output * self.mask_ph + inp * (1. - self.mask_ph)
+            inp.set_shape(inp.get_shape().as_list())
+            aug_x = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
 
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
-        x_hallu = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
-        
-        #attention branch 
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.relu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = self.contextual_attention(batch_size, x, x, downsampled_mask, 3, 1, 2) #hard coding batch size=16 for now
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = tf.concat([x_hallu, x], axis=3)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
+            x_hallu = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
+            
+            #attention branch 
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.relu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = self.contextual_attention(batch_size, x, x, downsampled_mask, 3, 1, 2) #hard coding batch size=16 for now
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = tf.concat([x_hallu, x], axis=3)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
 
-        x = Resize(2)(x) #upsample
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Resize(2)(x) #upsample
-        x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-        x = Conv2D(1, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
+            x = Resize(2)(x) #upsample
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Resize(2)(x) #upsample
+            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = Conv2D(3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
 
         return tf.clip_by_value(x, -1., 1.)
 
@@ -134,86 +142,87 @@ class InpaintModel:
         return penalty
 
     def contextual_attention(self, batch_size, f, b, mask, ksize, stride, rate, fuse_k=3, softmax_scale=10., training=True, fuse=True):
-        print("contextual f shape: ", f.shape)
-        f_shape = tf.shape(f)
-        f_size = f.get_shape().as_list()
-        b_size = b.get_shape().as_list()
-        mask_size = mask.get_shape().as_list()
+        with tf.variable_scope("contextual_attention"):
+            print("contextual f shape: ", f.shape)
+            f_shape = tf.shape(f)
+            f_size = f.get_shape().as_list()
+            b_size = b.get_shape().as_list()
+            mask_size = mask.get_shape().as_list()
 
-        kernel = 2*rate
-        b_patches = tf.extract_image_patches(
-            b, [1, kernel, kernel, 1], [1, rate*stride, rate*stride, 1], [1, 1, 1,1], padding='SAME')
-        print("b_patches shape: ", b_patches.shape)
-        b_patches = tf.reshape(b_patches, [-1, 32*32, kernel, kernel, b_size[3]]) # its 32 because the stride is 1*2 = 2
-        b_patches = tf.transpose(b_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
+            kernel = 2*rate
+            b_patches = tf.extract_image_patches(
+                b, [1, kernel, kernel, 1], [1, rate*stride, rate*stride, 1], [1, 1, 1,1], padding='SAME')
+            print("b_patches shape: ", b_patches.shape)
+            b_patches = tf.reshape(b_patches, [-1, 32*32, kernel, kernel, b_size[3]]) # its 32 because the stride is 1*2 = 2
+            b_patches = tf.transpose(b_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
 
-        #downsizing
-        f = tf.image.resize_bilinear(f, [int(f_size[1] / rate), int(f_size[2] / rate)], align_corners=True)
-        b = tf.image.resize_bilinear(b, [int(b_size[1] / rate), int(b_size[2] / rate)], align_corners=True)
-        mask = tf.image.resize_bilinear(mask, [int(mask_size[1] / rate), int(mask_size[2] / rate)], align_corners=True)
+            #downsizing
+            f = tf.image.resize_bilinear(f, [int(f_size[1] / rate), int(f_size[2] / rate)], align_corners=True)
+            b = tf.image.resize_bilinear(b, [int(b_size[1] / rate), int(b_size[2] / rate)], align_corners=True)
+            mask = tf.image.resize_bilinear(mask, [int(mask_size[1] / rate), int(mask_size[2] / rate)], align_corners=True)
 
-        sf_shape = tf.shape(f)
-        sf_size = f.get_shape().as_list()
-        f_batches = tf.split(f, batch_size, axis=0)
+            sf_shape = tf.shape(f)
+            sf_size = f.get_shape().as_list()
+            f_batches = tf.split(f, batch_size, axis=0)
 
-        sb_shape = tf.shape(b)
-        sb_size = b.get_shape().as_list()
+            sb_shape = tf.shape(b)
+            sb_size = b.get_shape().as_list()
 
 
-        sb_patches = tf.extract_image_patches(
-            b, [1, kernel, kernel, 1], [1, stride, stride, 1], [1, 1, 1,1], padding='SAME')
-        print("sb patches shape: ", sb_patches.shape)
-        sb_patches = tf.reshape(sb_patches, [-1, 32*32, kernel, kernel, sf_size[3]])
-        print("sb patches shape: ", sb_patches.shape)
-        sb_patches = tf.transpose(sb_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
-        print("sb patches shape: ", sb_patches.shape)
+            sb_patches = tf.extract_image_patches(
+                b, [1, kernel, kernel, 1], [1, stride, stride, 1], [1, 1, 1,1], padding='SAME')
+            print("sb patches shape: ", sb_patches.shape)
+            sb_patches = tf.reshape(sb_patches, [-1, 32*32, kernel, kernel, sf_size[3]])
+            print("sb patches shape: ", sb_patches.shape)
+            sb_patches = tf.transpose(sb_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
+            print("sb patches shape: ", sb_patches.shape)
 
-        mask_patches = tf.extract_image_patches(
-            mask, [1, kernel, kernel, 1], [1, stride, stride, 1], [1, 1, 1,1], padding='SAME')
+            mask_patches = tf.extract_image_patches(
+                mask, [1, kernel, kernel, 1], [1, stride, stride, 1], [1, 1, 1,1], padding='SAME')
 
-        print('input mask shape: ', mask.shape)
-        print("mask patch shape: ", mask_patches.shape)
-        mask_patches = tf.reshape(mask_patches, [-1, 32*32, kernel, kernel, 1])
-        mask_patches = tf.transpose(mask_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
-        print("patch shape: ", mask_patches.shape)
-        mask_patches = mask_patches[0]
-        strict_mask_patches = tf.cast(tf.equal(tf.reduce_mean(mask_patches, axis=[0,1,2], keepdims=True), 0.), tf.float32)
-        
-        sb_patches_batches = tf.split(sb_patches, batch_size, axis=0)
-        b_patches_batches = tf.split(b_patches, batch_size, axis=0)
-
-        conv_iden = tf.reshape(tf.eye(fuse_k), [fuse_k, fuse_k, 1, 1])
-
-        rets = []
-        for fs, sbps, bps in zip(f_batches, sb_patches_batches, b_patches_batches):
-            sbps = sbps[0] #[k, k, c, h*w]
-            bps = bps[0] #[k, k, c, h*w]
-            print("fs: ", fs.shape)
-            print("sbps: ", sbps.shape)
-            sbps_normed = sbps / tf.maximum(tf.sqrt(tf.reduce_sum(tf.square(sbps), axis=[0,1,2])), 1e-4)
-            x = tf.nn.conv2d(fs, sbps_normed, strides=[1,1,1,1], padding="SAME")
+            print('input mask shape: ', mask.shape)
+            print("mask patch shape: ", mask_patches.shape)
+            mask_patches = tf.reshape(mask_patches, [-1, 32*32, kernel, kernel, 1])
+            mask_patches = tf.transpose(mask_patches, [0, 2, 3, 4, 1]) #[b, k, k, c, h*w]
+            print("patch shape: ", mask_patches.shape)
+            mask_patches = mask_patches[0]
+            strict_mask_patches = tf.cast(tf.equal(tf.reduce_mean(mask_patches, axis=[0,1,2], keepdims=True), 0.), tf.float32)
             
-            #fusion
-            x = tf.reshape(x, [1, sf_size[1] * sf_size[2], sb_size[1] * sb_size[2], 1])
-            x = tf.nn.conv2d(x, conv_iden, strides=[1,1,1,1], padding='SAME') #left right consistency
-            x = tf.reshape(x, [1, sf_size[1], sf_size[2], sb_size[1], sb_size[2]])
-            x = tf.transpose(x, [0, 2, 1, 4, 3])
-            x = tf.reshape(x, [1, sf_size[1]*sf_size[2], sb_size[1]*sb_size[2], 1])
-            x = tf.nn.conv2d(x, conv_iden, strides=[1,1,1,1], padding='SAME') #top down consistency
-            x = tf.reshape(x, [1, sf_size[2], sf_size[1], sb_size[2], sb_size[1]])
-            x = tf.transpose(x, [0, 2, 1, 4, 3])
+            sb_patches_batches = tf.split(sb_patches, batch_size, axis=0)
+            b_patches_batches = tf.split(b_patches, batch_size, axis=0)
+
+            conv_iden = tf.reshape(tf.eye(fuse_k), [fuse_k, fuse_k, 1, 1])
+
+            rets = []
+            for fs, sbps, bps in zip(f_batches, sb_patches_batches, b_patches_batches):
+                sbps = sbps[0] #[k, k, c, h*w]
+                bps = bps[0] #[k, k, c, h*w]
+                print("fs: ", fs.shape)
+                print("sbps: ", sbps.shape)
+                sbps_normed = sbps / tf.maximum(tf.sqrt(tf.reduce_sum(tf.square(sbps), axis=[0,1,2])), 1e-4)
+                x = tf.nn.conv2d(fs, sbps_normed, strides=[1,1,1,1], padding="SAME")
+                
+                #fusion
+                x = tf.reshape(x, [1, sf_size[1] * sf_size[2], sb_size[1] * sb_size[2], 1])
+                x = tf.nn.conv2d(x, conv_iden, strides=[1,1,1,1], padding='SAME') #left right consistency
+                x = tf.reshape(x, [1, sf_size[1], sf_size[2], sb_size[1], sb_size[2]])
+                x = tf.transpose(x, [0, 2, 1, 4, 3])
+                x = tf.reshape(x, [1, sf_size[1]*sf_size[2], sb_size[1]*sb_size[2], 1])
+                x = tf.nn.conv2d(x, conv_iden, strides=[1,1,1,1], padding='SAME') #top down consistency
+                x = tf.reshape(x, [1, sf_size[2], sf_size[1], sb_size[2], sb_size[1]])
+                x = tf.transpose(x, [0, 2, 1, 4, 3])
+                
+                x = tf.reshape(x, [1, sf_size[1], sf_size[2], sb_size[1]* sb_size[2]])
+                print('xshape: ', x.shape)
             
-            x = tf.reshape(x, [1, sf_size[1], sf_size[2], sb_size[1]* sb_size[2]])
-            print('xshape: ', x.shape)
-        
-            x *= strict_mask_patches
-            x = tf.nn.softmax(x * softmax_scale, 3)
-            x *= strict_mask_patches
-            print("fshape: ", f.shape)
-            print("bps shape: ", bps.shape)
-            rets.append(tf.nn.conv2d_transpose(x, bps, tf.concat([[1], f_shape[1:]], axis=0), strides=[1, rate, rate, 1]) / 4.)
-        rets = tf.concat(rets, axis=0) #batching them up
-        rets.set_shape(f_size)
+                x *= strict_mask_patches
+                x = tf.nn.softmax(x * softmax_scale, 3)
+                x *= strict_mask_patches
+                print("fshape: ", f.shape)
+                print("bps shape: ", bps.shape)
+                rets.append(tf.nn.conv2d_transpose(x, bps, tf.concat([[1], f_shape[1:]], axis=0), strides=[1, rate, rate, 1]) / 4.)
+            rets = tf.concat(rets, axis=0) #batching them up
+            rets.set_shape(f_size)
         return rets
     
     def create_wgan_discriminator(self, batch, last_neuron_multiplier):
@@ -243,7 +252,7 @@ class InpaintModel:
 
     def build_minimal_graph(self, batch_size):
         with tf.device('/gpu:0'):
-            self.input_ph = tf.placeholder(np.uint8, shape=[None, 256, 256, 1])
+            self.input_ph = tf.placeholder(np.uint8, shape=[None, 256, 256, 3])
             self.mask_ph = tf.placeholder(np.float32, shape=[1, 256, 256, 1])
             self.norm_inp = tf.div(tf.to_float(self.input_ph), 127.5) - 1.
             self.ones_inp = tf.ones_like(self.norm_inp)
@@ -313,6 +322,8 @@ class InpaintModel:
             self.train_g_op = tf.train.AdamOptimizer(1e-4, beta1=0.5, beta2=0.9).minimize(self.total_g_losses)
             self.train_d_op = tf.train.AdamOptimizer(1e-4, beta1=0.5, beta2=0.9).minimize(self.total_d_losses)
 
+            comparison = tf.concat([self.norm_inp, masked_batch, fine_result], axis=2)
+
             tf.summary.scalar("loss/l1_loss", l1_loss)
             tf.summary.scalar("loss/ae_loss", ae_loss)
             tf.summary.scalar("convergence/d_loss", self.total_d_losses)
@@ -321,9 +332,7 @@ class InpaintModel:
             tf.summary.scalar("wgan_loss/gp_loss", gp_loss)
             tf.summary.scalar("wgan_loss/gp_penalty_local", local_gp)
             tf.summary.scalar("wgan_loss/gp_penalty_global", global_gp)
-            tf.summary.image("frame", self.norm_inp)
-            tf.summary.image("masked", masked_batch)
-            tf.summary.image("prediction", self.p_fine)
+            tf.summary.image("prediction", comparison)
             self.merged_summary = tf.summary.merge_all()
             
             self.merged_summary = tf.summary.merge_all()
