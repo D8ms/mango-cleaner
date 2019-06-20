@@ -5,11 +5,11 @@ from keras import backend as K
 from keras.layers import Conv2D, Dense, Activation, Reshape, Flatten
 from keras.engine import Layer
 
-from ported_ops import gen_conv
+from ported_ops import gen_conv, gen_deconv
 
-def my_gen_conv(x, neurons, activation, padding, kernel_size, strides=1, rate=1):
+def my_gen_conv(x, neurons, activation, padding, kernel_size, strides=1, dilation_rate=1, input_shape=None):
     #return Conv2D(neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-    return gen_conv(x, neurons, kernel_size, strides, rate, padding, activation)
+    return gen_conv(x, neurons, kernel_size, stride=strides, rate=dilation_rate, padding=padding, activation=activation)
 
 class Resize(Layer):
     def __init__(self, scale, **kwargs):
@@ -36,14 +36,14 @@ class Resize(Layer):
         return (self.input_shape[0], height, width, input_shape[3])
 
 class WGANDiscriminator:
-    def __init__(self, last_neuron_multiplier):
+    def __init__(self, last_neuron_multiplier, name):
         base_neurons = 64
-        self.l1 = Conv2D(1 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), input_shape=(128, 128, 3))
-        self.l2 = Conv2D(2 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
-        self.l3 = Conv2D(4 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
-        self.l4 = Conv2D(last_neuron_multiplier * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2))
+        self.l1 = Conv2D(1 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), input_shape=(128, 128, 3), name="discriminator/" + name + "_conv1")
+        self.l2 = Conv2D(2 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), name="discriminator/" + name + "_conv2")
+        self.l3 = Conv2D(4 * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), name="discriminator/" + name + "_conv3")
+        self.l4 = Conv2D(last_neuron_multiplier * base_neurons, activation=tf.nn.leaky_relu, padding='SAME', kernel_size=5, strides=(2, 2), name="discriminator/" + name + "_conv4")
         self.l5 = Flatten()
-        self.l6 = Dense(1)
+        self.l6 = Dense(1, name="discriminator/" + name + "_dense")
 
     def attach(self, batch_data):
         x = batch_data
@@ -53,40 +53,44 @@ class WGANDiscriminator:
         x = self.l4(x)
         x = self.l5(x)
         x = self.l6(x)
-        return tf.split(x, 2)
+        return x
 
 
 class InpaintModel:
     def create_coarse_network(self, inp, base_neurons=32):
         with tf.variable_scope("coarse_network"):
             inp = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))(inp)
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = my_gen_conv(inp, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
 
             downsampled_mask = tf.image.resize_nearest_neighbor(self.mask_ph, size=(x.get_shape().as_list()[1:3]), align_corners=True)
             print("orig downsampled mask shape: ", downsampled_mask.shape)
 
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-
-            x = Resize(2)(x) #upsample
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-
-            x = Resize(2)(x) #upsample
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
             
-            x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
+            x = gen_deconv(x, 2 * base_neurons)
+
+            #x = Resize(2)(x) #upsample
+            #x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+
+            #x = Resize(2)(x) #upsample
+            #x = my_gen_conv(x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            
+            x = gen_deconv(x, 1 * base_neurons)
+            
+            x = my_gen_conv(x, base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
     
             coarse_prediction = tf.clip_by_value(x, -1., 1.)
         return coarse_prediction, downsampled_mask
@@ -97,39 +101,47 @@ class InpaintModel:
             inp.set_shape(inp.get_shape().as_list())
             aug_x = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
 
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))(x)
-            x_hallu = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))(x)
+            x = my_gen_conv(aug_x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))
+            x = my_gen_conv(x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(2, 2))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(4, 4))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(8, 8))
+            x_hallu = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, dilation_rate=(16, 16))
             
             #attention branch 
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))(aug_x)
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2))(x) #downsample
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.relu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = my_gen_conv(aug_x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1))
+            x = my_gen_conv(x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.relu, padding='SAME', kernel_size=3, strides=(1, 1))
             x = self.contextual_attention(batch_size, x, x, downsampled_mask, 3, 1, 2) #hard coding batch size=16 for now
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
             x = tf.concat([x_hallu, x], axis=3)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
 
-            x = Resize(2)(x) #upsample
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Resize(2)(x) #upsample
-            x = Conv2D(1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))(x)
-            x = Conv2D(3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))(x)
+            #x = Resize(2)(x) #upsample
+            #x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+
+            x = gen_deconv(x, 2 * base_neurons)
+
+            x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+
+            #x = Resize(2)(x) #upsample
+            #x = my_gen_conv(x, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+
+            x = gen_deconv(x, 1 * base_neurons)
+
+
+            x = my_gen_conv(x, base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
 
         return tf.clip_by_value(x, -1., 1.)
 
@@ -254,13 +266,13 @@ class InpaintModel:
         with tf.device('/gpu:0'):
             self.input_ph = tf.placeholder(np.uint8, shape=[None, 256, 256, 3])
             self.mask_ph = tf.placeholder(np.float32, shape=[1, 256, 256, 1])
-            self.norm_inp = tf.div(tf.to_float(self.input_ph), 127.5) - 1.
+            self.norm_inp = tf.div(tf.to_float(tf.reverse(self.input_ph, axis=[-1])), 127.5) - 1.
             self.ones_inp = tf.ones_like(self.norm_inp)
             masked_batch = self.norm_inp * (1. - self.mask_ph)
 
-
-            self.p_coarse, downsampled_mask = self.create_coarse_network(masked_batch)
-            self.p_fine = self.create_fine_network(masked_batch, self.p_coarse, downsampled_mask, batch_size)
+            with tf.variable_scope("inpainting_network"):
+                self.p_coarse, downsampled_mask = self.create_coarse_network(masked_batch)
+                self.p_fine = self.create_fine_network(masked_batch, self.p_coarse, downsampled_mask, batch_size)
        
     def build_full_graph(self, batch_size=16):
         self.build_minimal_graph(batch_size)
@@ -295,12 +307,14 @@ class InpaintModel:
             global_pos_neg = tf.concat([batch_pos, fine_result], axis=0)
             local_pos_neg = tf.concat([local_target, local_fine], axis=0)
 
-            local_discriminator = WGANDiscriminator(4)
-            global_discriminator = WGANDiscriminator(8)
+            with tf.variable_scope("discriminator"):
+                #apparently variable_scope doesn't work for keras, I'll locally annotate the names
+                local_discriminator = WGANDiscriminator(4, name='local')
+                global_discriminator = WGANDiscriminator(8, name='global')
 
 
-            global_pos, global_neg = global_discriminator.attach(global_pos_neg)
-            local_pos, local_neg = local_discriminator.attach(local_pos_neg)
+            global_pos, global_neg = tf.split(global_discriminator.attach(global_pos_neg), 2)
+            local_pos, local_neg = tf.split(local_discriminator.attach(local_pos_neg), 2)
 
             global_g_loss, global_d_loss = self.create_wgan_loss(global_pos, global_neg)
             local_g_loss, local_d_loss = self.create_wgan_loss(local_pos, local_neg)
@@ -319,8 +333,24 @@ class InpaintModel:
             self.total_g_losses = 0.001 * (global_g_loss + local_g_loss) + 1.2 * l1_loss + 1.2 * ae_loss
             self.total_d_losses = global_d_loss + local_d_loss + gp_loss
             
-            self.train_g_op = tf.train.AdamOptimizer(1e-4, beta1=0.5, beta2=0.9).minimize(self.total_g_losses)
-            self.train_d_op = tf.train.AdamOptimizer(1e-4, beta1=0.5, beta2=0.9).minimize(self.total_d_losses)
+            self.g_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "inpainting_network")
+            self.d_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "discriminator")
+            all_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+
+            print("g_vars")
+            print(self.g_vars)
+            print("d_vars")
+            print(self.d_vars)
+            print("allvars")
+            print(all_vars)
+
+            self.optimizer = tf.train.AdamOptimizer(1e-4, beta1=0.5, beta2=0.9)
+
+            self.d_grads = self.optimizer.compute_gradients(self.total_d_losses, self.d_vars)
+            self.g_grads = self.optimizer.compute_gradients(self.total_g_losses, self.g_vars)
+
+            self.train_g_op = self.optimizer.apply_gradients(self.d_grads)
+            self.train_d_op = self.optimizer.apply_gradients(self.g_grads)
 
             comparison = tf.concat([self.norm_inp, masked_batch, fine_result], axis=2)
 
@@ -333,9 +363,9 @@ class InpaintModel:
             tf.summary.scalar("wgan_loss/gp_penalty_local", local_gp)
             tf.summary.scalar("wgan_loss/gp_penalty_global", global_gp)
             tf.summary.image("prediction", comparison)
-            self.merged_summary = tf.summary.merge_all()
             
-            self.merged_summary = tf.summary.merge_all()
+            self.merged_summary = tf.summary.merge_all() 
+    
     def train_g(self, sess, img, mask, bbox, spatial_discount):
         _, summary = sess.run(
             [self.train_g_op, self.merged_summary],
