@@ -18,6 +18,39 @@ def rand_bbox(height=256, width=256, length=128):
     #tlhw
     return (t, l, length, length)
 
+def bbox_to_many_masks(bbox, n_mask, img_length=256, crop_length=50, margin=16):
+    # We expect the image to be 256 x 256
+    # The bbox contains tlhw, h and w are 128
+    # a zone of 128 x 128 is selected
+    # multiple boxes of size 32 x 32 is cropped
+    # the spatial discounting mask is for the 128 x 128 zone.
+    t, l, h, w = bbox
+    mask = np.zeros((1, img_length, img_length, 1), np.float32)
+    discounting_mask = np.ones((h, w), np.float32)
+    gamma = 0.9
+    for _ in range(n_mask):
+        dh = np.random.randint(margin, h - margin - crop_length)
+        dw = np.random.randint(margin, w - margin - crop_length)
+        print("derp")
+        print(dh, dw)
+        mask[:, t + dh : t + dh + crop_length, l + dw : l + dw + crop_length, :] = 1
+        print(t + dh + crop_length)
+        print(l + dw + crop_length)
+        for i in range(crop_length):
+            for j in range(crop_length):
+                #print(dh, dw, i, j)
+                discounting_mask[dh + i, dw + j] = min(
+                    max(
+                        gamma**min(i, crop_length - i),
+                        gamma**min(j, crop_length - j),
+                    ),
+                    discounting_mask[dh + i, dw + j]
+                )
+
+    discounting_mask = np.expand_dims(discounting_mask, 0)
+    discounting_mask = np.expand_dims(discounting_mask, 3)
+    return mask, discounting_mask 
+
 def bbox_to_mask(bbox, length=256):
     mask = np.zeros((1, length, length, 1), np.float32)
     dh = np.random.randint(17)

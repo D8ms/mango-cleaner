@@ -60,7 +60,7 @@ class InpaintModel:
     def create_coarse_network(self, inp, base_neurons=32):
         with tf.variable_scope("coarse_network"):
             inp = tf.concat([inp, self.ones_inp, self.ones_inp * self.mask_ph], axis=3)
-            x = my_gen_conv(inp, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 3))
+            x = my_gen_conv(inp, 1 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=5, strides=(1, 1), input_shape=(256, 256, 1))
             x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
             x = my_gen_conv(x, 2 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
             x = my_gen_conv(x, 4 * base_neurons, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(2, 2)) #downsample
@@ -90,7 +90,7 @@ class InpaintModel:
             x = gen_deconv(x, 1 * base_neurons)
             
             x = my_gen_conv(x, base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
-            x = my_gen_conv(x, 3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 1, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
     
             coarse_prediction = tf.clip_by_value(x, -1., 1.)
         return coarse_prediction, downsampled_mask
@@ -141,7 +141,7 @@ class InpaintModel:
 
 
             x = my_gen_conv(x, base_neurons // 2, activation=tf.nn.elu, padding='SAME', kernel_size=3, strides=(1, 1))
-            x = my_gen_conv(x, 3, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
+            x = my_gen_conv(x, 1, padding='SAME', activation=None, kernel_size=3, strides=(1, 1))
 
         return tf.clip_by_value(x, -1., 1.)
 
@@ -264,7 +264,7 @@ class InpaintModel:
 
     def build_minimal_graph(self, batch_size):
         with tf.device('/gpu:0'):
-            self.input_ph = tf.placeholder(np.uint8, shape=[None, 256, 256, 3])
+            self.input_ph = tf.placeholder(np.uint8, shape=[None, 256, 256, 1])
             self.mask_ph = tf.placeholder(np.float32, shape=[1, 256, 256, 1])
             self.norm_inp = tf.div(tf.to_float(tf.reverse(self.input_ph, axis=[-1])), 127.5) - 1.
             self.ones_inp = tf.ones_like(self.norm_inp)
@@ -363,6 +363,7 @@ class InpaintModel:
             tf.summary.scalar("wgan_loss/gp_penalty_local", local_gp)
             tf.summary.scalar("wgan_loss/gp_penalty_global", global_gp)
             tf.summary.image("prediction", comparison)
+            tf.summary.image("spatial", self.spatial_discounting_mask_ph)
             
             self.merged_summary = tf.summary.merge_all() 
     

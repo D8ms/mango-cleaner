@@ -58,7 +58,6 @@ def run():
         sess.run(tf.global_variables_initializer())
         for i in range(EPOCHS):
             print("epoch:", str(i))
-            print(imgs[0].shape)
             sys.stdout.flush()
             for _ in range(5):
                 train_d(sess, imgs, model)

@@ -12,7 +12,7 @@ EPOCHS = 50000
 BATCH_SIZE = 16
 
 def load_images():
-    img_dir = "/home/tqi/work/deep_clean/redraw/data/senryuu_shoujo/clean/*.png"
+    img_dir = "/home/tqi/work/deep_clean/redraw/ss_data/*.png"
     full_paths = glob.glob(img_dir)
     imgs = []
     
@@ -21,11 +21,12 @@ def load_images():
         width, height = img.size
         img.resize((1024, 685), Image.BILINEAR)
         arr = np.array(img)
-        if arr.shape[-1] == 3:
-            r = arr[:,:,0]
-            g = arr[:,:,1]
-            b = arr[:,:,2]
-            arr = 0.2989 * r + 0.5870 * g + 0.1140 * b
+        print(arr.shape)
+        #if arr.shape[-1] == 3:
+        #    r = arr[:,:,0]
+        #    g = arr[:,:,1]
+        #    b = arr[:,:,2]
+        #    arr = 0.2989 * r + 0.5870 * g + 0.1140 * b
         imgs.append(arr)
     return imgs
 
@@ -41,16 +42,18 @@ def get_crops(imgs, n):
 def train_g(sess, imgs, model):
     batch_imgs = get_crops(imgs, BATCH_SIZE)
     bbox = rand_bbox()
-    spatial_discount = simple_discounting_mask()
-    mask = bbox_to_mask(bbox)
+    mask, spatial_discount = bbox_to_many_masks(bbox, 1)
+    #spatial_discount = simple_discounting_mask()
+    #mask = bbox_to_mask(bbox)
     summary = model.train_g(sess, batch_imgs, mask, bbox, spatial_discount)
     return summary
 
 def train_d(sess, imgs, model):
     batch_imgs = get_crops(imgs, BATCH_SIZE)
     bbox = rand_bbox()
-    spatial_discount = simple_discounting_mask()
-    mask = bbox_to_mask(bbox)
+    mask, spatial_discount = bbox_to_many_masks(bbox, 1)
+    #spatial_discount = simple_discounting_mask()
+    #mask = bbox_to_mask(bbox)
     model.train_d(sess, batch_imgs, mask, bbox, spatial_discount)
 
 def run():
@@ -65,9 +68,11 @@ def run():
             #yeah d trains twice per epoch
             print("epoch:", str(i))
             sys.stdout.flush()
-            train_d(sess, imgs, model)
+            for _ in range(5):
+                train_d(sess, imgs, model)
             summary = train_g(sess, imgs, model)
-            train_d(sess, imgs, model)
+            for _ in range(5):
+                train_d(sess, imgs, model)
             summary_recorder.add_summary(summary, i)
 if __name__ == "__main__":
     run()
